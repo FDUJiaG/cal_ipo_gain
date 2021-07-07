@@ -2,16 +2,18 @@ import os
 import pandas as pd
 import tushare as ts
 import warnings
-from pkg.utils import print_info
+from pkg.utils import print_info, quarter_date_dict
 from pkg.secret import TS_TOKEN
 from WindPy import w
 
 warnings.filterwarnings("ignore")
 
 
-def cal_gain_ht(f_name, df, ipo, start_d="20210101", end_d="20210331"):
-    pro = ts.pro_api(TS_TOKEN)
-    w.start()
+def cal_gain_ht(f_name, df, ipo, qno):
+    # 生成季节的起止节点
+    # 例如：start_d="20210101", end_d="20210331"
+    start_d = "".join([qno[:4], quarter_date_dict[qno[-2:]][0].replace("-", "")])
+    end_d = "".join([qno[:4], quarter_date_dict[qno[-2:]][-1].replace("-", "")])
 
     # 去除重复的行
     df.drop_duplicates(inplace=True)
@@ -78,7 +80,12 @@ def cal_gain_ht(f_name, df, ipo, start_d="20210101", end_d="20210331"):
             if stock_type == "可转债":
                 item_dict[out_columns[0]] = df_ns[df_ns["证券代码"] == ns_item]["证券名称"].tolist()[0]
             else:
-                item_dict[out_columns[0]] = ipo[ipo["ts_code"] == ts_code]["name"].tolist()[0]
+                try:
+                    item_dict[out_columns[0]] = ipo[ipo["ts_code"] == ts_code]["name"].tolist()[0]
+                except:
+                    item_dict[out_columns[0]] = w.wsd(
+                        ts_code, "sec_name", wind_date, wind_date, "currencyType="
+                    ).Data[0][0]
         except:
             item_dict[out_columns[0]] = pro.stock_basic(
                 ts_code=ts_code,
@@ -111,18 +118,27 @@ def cal_gain_ht(f_name, df, ipo, start_d="20210101", end_d="20210331"):
             print("异常证券代码: {}".format(ts_code))
 
         # 发行价
+        wind_date = "-".join([qno[:4], quarter_date_dict[qno[-2:]][-1]])
         if stock_type == "可转债":
             item_dict[out_columns[5]] = 100
         else:
             try:
                 item_dict[out_columns[5]] = ipo[ipo["ts_code"] == ts_code]["price"].tolist()[0]
+                if item_dict[out_columns[5]] == 0:
+                    item_dict[out_columns[5]] = w.wsd(
+                        ts_code, "ipo_price2", wind_date, wind_date, "currencyType="
+                    ).Data[0][0]
             except:
                 item_dict[out_columns[5]] = w.wsd(
-                    ts_code, "ipo_price2", "2021-03-31", "2021-03-31", "currencyType="
+                    ts_code, "ipo_price2", wind_date, wind_date, "currencyType="
                 ).Data[0][0]
         # 网下佣金
         if stock_type == "科创板":
-            commission = item_dict[out_columns[5]] * buy_num * 0.005
+            if item_dict[out_columns[1]].split(".")[0] == "688538":
+                # 和辉光电网下佣金率 0.4%
+                commission = item_dict[out_columns[5]] * buy_num * 0.004
+            else:
+                commission = item_dict[out_columns[5]] * buy_num * 0.005
         else:
             commission = 0
         item_dict[out_columns[6]] = commission
@@ -202,7 +218,7 @@ def cal_gain_ht(f_name, df, ipo, start_d="20210101", end_d="20210331"):
     df_out.drop(labels=out_columns[-1], axis=1, inplace=True)
     # 保存结果
     out_name = f_name.split(".")[0] + "新收益统计.xlsx"
-    out_path = os.path.join(os.path.abspath(".."), "output", out_name)
+    out_path = os.path.join(os.path.abspath(".."), "output", qno,  out_name)
     df_out.to_excel(out_path, index=None)
 
 
@@ -249,14 +265,21 @@ if __name__ == '__main__':
     # w.stop()
 
     # # 文件夹计算
-    dir_path = os.path.join(os.path.abspath(".."), "raw_data", "2021Q1")
+    period = "2021Q2"
+    dir_path = os.path.join(os.path.abspath(".."), "raw_data", period)
     file_list = os.listdir(dir_path)
-    ipo_df = pd.read_csv("ipo.csv", index_col=0, converters={"发生日期": str, "证券代码": str})
+    # ipo_df = pd.read_csv("ipo.csv", index_col=0, converters={"发生日期": str, "证券代码": str})
+
+    # 通过 tushare 获取一个 ipo 表格, 删除发行价没有的行
+    pro = ts.pro_api(TS_TOKEN)
+    ts_end_d = "".join([period[:4], quarter_date_dict[period[-2:]][-1].replace("-", "")])
+    ipo_df = pro.new_share(start_date='20200101', end_date=ts_end_d)
+    ipo_df.dropna(subset=["price"], inplace=True)
 
     w.start()
     for file_name in file_list:
         if file_name.split(".")[-1] == "xls":
             file_path = os.path.join(dir_path, file_name)
             raw_df = pd.read_table(file_path, encoding="gbk", converters={"发生日期": str, "证券代码": str})
-            cal_gain_ht(file_name, raw_df, ipo_df, "20210101", "20210331")
+            cal_gain_ht(file_name, raw_df, ipo_df, period)
     w.stop()

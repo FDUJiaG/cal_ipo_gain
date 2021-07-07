@@ -132,6 +132,7 @@ dmypy.json
 *.xls
 *.xlsx
 *.html
+*.rar
 .idea/
 bak/
 secret.py

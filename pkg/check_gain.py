@@ -63,7 +63,7 @@ def check_gain(dir_s, dir_d):
 
 
 if __name__ == '__main__':
-    cal_quarter = "2021Q1"
+    cal_quarter = "2021Q2"
     self_path = os.path.join(os.path.abspath(".."), "output", cal_quarter)
     dpf_path = os.path.join(os.path.abspath(".."), "dpf", cal_quarter)
     check_gain(self_path, dpf_path)
